@@ -12,7 +12,7 @@ const char* password =  "Danik57WIFIsafe!12";    //Add your WiFi password
 #define PIN_ENGINE_UP 14
 #define PIN_ENGINE_DOWN 12
 #define SM_ITER_TIME 10
-#define MAX_IDLE_TIME 60000
+#define MAX_IDLE_TIME 150000
 // const char* ssid = "Arnon";             //Add your WiFi ssid
 // const char* password =  "ar0765401922";    //Add your WiFi password
 const int led = 2;
@@ -72,7 +72,8 @@ void setup()
       
 
         server.on("/", HTTP_GET, handleRoot);     // Call the 'handleRoot' function when a client requests URI "/"
-        server.on("/turnon", handleTurnOn); // New handler for turning on the output
+        server.on("/turnon", handleTurnOn);       // New handler for turning on the output
+        server.on("/reverse", HTTP_GET, handleRevese);// New handler for reverse turn to ease the stress
        // server.on("/LED", HTTP_POST, handleLED);  // Call the 'handleLED' function when a POST request is made to URI "/LED"
         server.onNotFound(handleNotFound);        // When a client requests an unknown URI (i.e. something other than "/"), call function "handleNotFound"
 
@@ -90,28 +91,53 @@ void loop() {
 }
 
 void handleRoot() {                         // When URI / is requested, send a web page with a button to toggle the LED
-
+    String color="#00ff00"; //green
+  if(digitalRead(PIN_IR_DETECTOR_IN)) 
+    color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
   html += "<h1>ESP8266 Web Server ver 2</h1>";
-  html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: #00ff00' onclick='turnOn()'>Open door</button>";
-  html += "<script>function turnOn(){var xhr=new XMLHttpRequest();xhr.open('GET','/turnon',true);xhr.send();document.getElementById('turnButton').style.backgroundColor='#ff0000';}</script>";
+  html += "<div style='display: flex; flex-direction: column; align-items: flex-start; padding: 20px;'>";  // Container with flexbox
+  html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: "+color+"; margin-bottom: 20px;' onclick='turnOn()'>Open door</button>";
+  html += "<button id='RevButton' style='font-size: 50px; padding: 26px; background-color: #33fff9' onclick='revTurn()'>Reverse</button>";
+  html += "</div>";
+  html += "<script>function turnOn(){var xhr=new XMLHttpRequest();xhr.open('GET','/turnon',true);xhr.send();document.getElementById('turnButton').style.backgroundColor='"+color+"';}</script>";
+  html += "<script>function revTurn(){var xhr=new XMLHttpRequest();xhr.open('GET','/reverse',true);xhr.send();}</script>";
   html += "</body></html>";
 
   server.send(200, "text/html", html);
 }
 
 void handleTurnOn() {
-   
+    String response = "";
     if(!digitalRead(PIN_IR_DETECTOR_IN))    
     {
+        response = "Going to open";
         Serial.println("Going to open");
         gSM_state = 1;
+        response = "Ack";
     }
     else
     {
        gSM_state = 0;
        Serial.println("Already open");
+       response = "Already open";
     }
+    server.send(200, "text/plain", response);
+}
+
+void handleRevese()
+{
+    //Serial.println("hello world gm ");
+    //Serial.print(gSM_state);
+    String response = "Can't now";
+    if(gSM_state==0)
+    {
+        RunEngine(-1);
+        delay(1000);
+        RunEngine(0);
+        response = "Ack";
+    }
+    server.send(200, "text/plain", response);
 }
 
 void handleNotFound(){
