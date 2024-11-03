@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "ir_detector")(type "KiCad")(uri "C:/Users/Daniel/Documents/Lab/kicad/ir_detector.kicad_sym")(options "")(descr ""))
+  (lib (name "L9110")(type "Legacy")(uri "C:/Users/Daniel/Documents/Lab/kicad/KiCad-parts-master/library/L9110.lib")(options "")(descr ""))
+)

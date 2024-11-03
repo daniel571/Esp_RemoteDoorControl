@@ -7,17 +7,19 @@
 
 #define BARKER 0x1234
 
-const char* ssid = "TP-LINK_AP_9C2C";             //Add your WiFi ssid
-const char* password =  "Danik57WIFIsafe!12";    //Add your WiFi password
+//const char* ssid = "TP-LINK_AP_9C2C";             //Add your WiFi ssid
+//const char* password =  "Danik57WIFIsafe!12";    //Add your WiFi password
 
 #define PIN_IR_DETECTOR_IN 4
 #define PIN_IR_DETECTOR_EN 5
 #define PIN_ENGINE_UP 14
 #define PIN_ENGINE_DOWN 12
+#define PIN_DOOR_CLOSE_BTN 13
 #define SM_ITER_TIME 10
 #define MAX_IDLE_TIME 150000
-// const char* ssid = "Arnon";             //Add your WiFi ssid
-// const char* password =  "ar0765401922";    //Add your WiFi password
+#define ROTATION_TIMEOUT 120000
+ const char* ssid = "Arnon";             //Add your WiFi ssid
+ const char* password =  "ar0765401922";    //Add your WiFi password
 const int led = 2;
 
 String Daniel_apiKey = "129959";              //Add your Token number that bot has sent you on WhatsApp messenger
@@ -26,6 +28,7 @@ String Daniel_phone_number = "+972542565256"; //Add your WhatsApp app registered
 String Roni_apiKey = "9331675";              //Add your Token number that bot has sent you on WhatsApp messenger
 String Roni_phone_number = "+972544682818"; //Add your WhatsApp app registered phone number (same number that bot send you in url)
 
+int gBtn_isValid = 0; // we don't know if the btn is valid yet.
 int gSM_state = 0;
 unsigned int idle_time = 0;
 const int port = 443;//SSL_PORT; // server port number
@@ -77,6 +80,7 @@ void setup()
     
     eeprom_handler();
     pinMode(PIN_IR_DETECTOR_IN, INPUT);
+    pinMode(PIN_DOOR_CLOSE_BTN, INPUT_PULLUP); // 1 - is open, 0 - is close
     pinMode(PIN_IR_DETECTOR_EN, OUTPUT);
     pinMode(PIN_ENGINE_UP, OUTPUT);
     pinMode(PIN_ENGINE_DOWN, OUTPUT);
@@ -193,7 +197,7 @@ void handleRoot() {                         // When URI / is requested, send a w
   if(digitalRead(PIN_IR_DETECTOR_IN)) 
     color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
-  html += "<h1>ESP8266 Web Server ver 2</h1>";
+  html += "<h1>ESP8266 Web Server ver 3</h1>";
   html += "<div style='display: flex; flex-direction: column; align-items: flex-start; padding: 20px;'>";  // Container with flexbox
   html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: "+color+"; margin-bottom: 20px;' onclick='turnOn()'>Open door</button>";
   html += "<button id='RevButton' style='font-size: 50px; padding: 26px; margin-bottom: 20px; background-color: #33fff9' onclick='revTurn()'>Reverse</button>";
@@ -201,7 +205,7 @@ void handleRoot() {                         // When URI / is requested, send a w
   html += "</form>";
   html += "<div id='response'></div>";
   html += "</div>";
-  html += "<script>function turnOn(){var xhr=new XMLHttpRequest();xhr.open('GET','/turnon',true);xhr.send();document.getElementById('turnButton').style.backgroundColor='"+color+"';}</script>";
+  html += "<script>function turnOn(){var xhr=new XMLHttpRequest();xhr.open('GET','/turnon',true);xhr.send();document.getElementById('turnButton').style.backgroundColor='#ff0000';}</script>";
   html += "<script>function revTurn(){var xhr=new XMLHttpRequest();xhr.open('GET','/reverse',true);xhr.send();}</script>";
     // JavaScript to handle the AJAX request
   html += "<script>";
@@ -245,6 +249,7 @@ void handleTurnOn() {
         response = "Going to open";
         Serial.println("Going to open");
         gSM_state = 1;
+        idle_time = 0;
         response = "Ack";
     }
     else
@@ -278,6 +283,7 @@ void handleNotFound(){
 
 void Handle_SM()
 {
+    unsigned int rotation_timeout = ( (ReverseHoldOff*13) /10 ) + 2400; 
     delay(SM_ITER_TIME);
     switch(gSM_state)
     {
@@ -286,10 +292,14 @@ void Handle_SM()
             if(idle_time >= MAX_IDLE_TIME/SM_ITER_TIME)
                 ShutDown();
             RunEngine(0);
+            if(!digitalRead(PIN_IR_DETECTOR_IN) && !digitalRead(PIN_DOOR_CLOSE_BTN)) // both button and IR signals the door is CLOSE -> the Button is valid to use
+                gBtn_isValid = 1;
         break;
         case 1: // open the door
             RunEngine(1);
-            if(digitalRead(PIN_IR_DETECTOR_IN)) 
+            idle_time++;
+            if(digitalRead(PIN_IR_DETECTOR_IN)  || (idle_time >= rotation_timeout/SM_ITER_TIME) ||
+                    (digitalRead(PIN_DOOR_CLOSE_BTN) && gBtn_isValid) )
             {
                 RunEngine(0);
                 gSM_state = 2;
