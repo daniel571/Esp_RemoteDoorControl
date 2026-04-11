@@ -10,7 +10,7 @@
 //const char* ssid = "TP-LINK_AP_9C2C";             //Add your WiFi ssid
 //const char* password =  "Danik57WIFIsafe!12";    //Add your WiFi password
 
-#define PIN_IR_DETECTOR_IN 4
+#define PIN_LATCH_POWER 4   // latch power
 #define PIN_IR_DETECTOR_EN 5
 #define PIN_ENGINE_UP 14
 #define PIN_ENGINE_DOWN 12
@@ -38,8 +38,8 @@ String url;                            //url String will be used to store the fi
 ESP8266WebServer server(80);    // Create a webserver object that listens for HTTP request on port 80
 String newHostname = "ESP_DoorController-DD";
 IPAddress subnet(255, 255, 255, 0);                  // Subnet Mask
-IPAddress gateway(192, 168, 1, 1);                  // Default Gateway
-IPAddress local_IP(192, 168, 1, 253);             // Static IP Address for esp8266
+IPAddress gateway(10, 100, 102, 1);                  // Default Gateway
+IPAddress local_IP(10, 100, 102, 253);             // Static IP Address for esp8266
 
 int RotationPol = 1;
 unsigned int ReverseHoldOff = 2000;
@@ -79,7 +79,8 @@ void setup()
     Serial.begin(115200);
     
     eeprom_handler();
-    pinMode(PIN_IR_DETECTOR_IN, INPUT);
+    pinMode(PIN_LATCH_POWER, OUTPUT);
+    digitalWrite(PIN_LATCH_POWER, HIGH);
     pinMode(PIN_DOOR_CLOSE_BTN, INPUT_PULLUP); // 1 - is open, 0 - is close
     pinMode(PIN_IR_DETECTOR_EN, OUTPUT);
     pinMode(PIN_ENGINE_UP, OUTPUT);
@@ -194,7 +195,7 @@ void handleConfigPage() {
 
 void handleRoot() {                         // When URI / is requested, send a web page with a button to toggle the LED
     String color="#00ff00"; //green
-  if(digitalRead(PIN_IR_DETECTOR_IN)) 
+  if(digitalRead(PIN_DOOR_CLOSE_BTN)) 
     color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
   html += "<h1>ESP8266 Web Server ver 3</h1>";
@@ -244,7 +245,7 @@ void handlePasswordCheck() {
 
 void handleTurnOn() {
     String response = "";
-    if(!digitalRead(PIN_IR_DETECTOR_IN))    
+    if(!digitalRead(PIN_DOOR_CLOSE_BTN))    
     {
         response = "Going to open";
         Serial.println("Going to open");
@@ -292,14 +293,14 @@ void Handle_SM()
             if(idle_time >= MAX_IDLE_TIME/SM_ITER_TIME)
                 ShutDown();
             RunEngine(0);
-            if(!digitalRead(PIN_IR_DETECTOR_IN) && !digitalRead(PIN_DOOR_CLOSE_BTN)) // both button and IR signals the door is CLOSE -> the Button is valid to use
-                gBtn_isValid = 1;
+            // if( !digitalRead(PIN_DOOR_CLOSE_BTN)) // both button and IR signals the door is CLOSE -> the Button is valid to use
+            //     gBtn_isValid = 1;
         break;
         case 1: // open the door
             RunEngine(1);
             idle_time++;
-            if(digitalRead(PIN_IR_DETECTOR_IN)  || (idle_time >= rotation_timeout/SM_ITER_TIME) ||
-                    (digitalRead(PIN_DOOR_CLOSE_BTN) && gBtn_isValid) )
+            if((idle_time >= rotation_timeout/SM_ITER_TIME) ||
+                    (digitalRead(PIN_DOOR_CLOSE_BTN)) )
             {
                 RunEngine(0);
                 gSM_state = 2;
