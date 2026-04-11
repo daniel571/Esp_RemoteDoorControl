@@ -284,7 +284,7 @@ void handleNotFound(){
 
 void Handle_SM()
 {
-    unsigned int rotation_timeout = ( (ReverseHoldOff*13) /10 ) + 2400; 
+    unsigned int rotation_timeout = ( (ReverseHoldOff*13) /10 ) + 7000; 
     delay(SM_ITER_TIME);
     switch(gSM_state)
     {
