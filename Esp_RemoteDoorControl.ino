@@ -7,9 +7,6 @@
 
 #define BARKER 0x1234
 
-//const char* ssid = "TP-LINK_AP_9C2C";             //Add your WiFi ssid
-//const char* password =  "Danik57WIFIsafe!12";    //Add your WiFi password
-
 #define PIN_LATCH_POWER 4   // latch power
 #define PIN_IR_DETECTOR_EN 5
 #define PIN_ENGINE_UP 14
@@ -18,8 +15,8 @@
 #define SM_ITER_TIME 10
 #define MAX_IDLE_TIME 150000
 #define ROTATION_TIMEOUT 120000
- const char* ssid = "Arnon";             //Add your WiFi ssid
- const char* password =  "ar0765401922";    //Add your WiFi password
+const char* ssid = "Arnon";
+const char* password = "ar0765401922";
 const int led = 2;
 
 String Daniel_apiKey = "129959";              //Add your Token number that bot has sent you on WhatsApp messenger
@@ -30,6 +27,8 @@ String Roni_phone_number = "+972544682818"; //Add your WhatsApp app registered p
 
 int gBtn_isValid = 0; // we don't know if the btn is valid yet.
 int gSM_state = 0;
+int gDoorOpenCount = 0; // debounce counter for door-open sensor
+#define DOOR_OPEN_THRESHOLD 11
 unsigned int idle_time = 0;
 const int port = 443;//SSL_PORT; // server port number
 
@@ -101,10 +100,10 @@ void setup()
     int8_t status = WiFi.waitForConnectResult(30000);
     if(status == WL_CONNECTED)
     {
-       // Serial.println("Connected");
+       Serial.println("Connected");
          Serial.println(WiFi.SSID());              // Tell us what network we're connected to
          delay(100);
-       // Serial.print("IP address:\t");
+       Serial.print("IP address:\t");
         Serial.println(WiFi.localIP());           // Send the IP address of the ESP8266 to the computer
 
       
@@ -198,7 +197,7 @@ void handleRoot() {                         // When URI / is requested, send a w
   if(digitalRead(PIN_DOOR_CLOSE_BTN)) 
     color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
-  html += "<h1>ESP8266 Web Server ver 3</h1>";
+  html += "<h1>ESP8266 Web Server ver 10</h1>";
   html += "<div style='display: flex; flex-direction: column; align-items: flex-start; padding: 20px;'>";  // Container with flexbox
   html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: "+color+"; margin-bottom: 20px;' onclick='turnOn()'>Open door</button>";
   html += "<button id='RevButton' style='font-size: 50px; padding: 26px; margin-bottom: 20px; background-color: #33fff9' onclick='revTurn()'>Reverse</button>";
@@ -251,6 +250,7 @@ void handleTurnOn() {
         Serial.println("Going to open");
         gSM_state = 1;
         idle_time = 0;
+        gDoorOpenCount = 0; // reset debounce counter when starting
         response = "Ack";
     }
     else
@@ -284,7 +284,7 @@ void handleNotFound(){
 
 void Handle_SM()
 {
-    unsigned int rotation_timeout = ( (ReverseHoldOff*13) /10 ) + 7000; 
+    unsigned int rotation_timeout = ( (ReverseHoldOff*15) /10 ) + 6000; 
     delay(SM_ITER_TIME);
     switch(gSM_state)
     {
@@ -293,17 +293,27 @@ void Handle_SM()
             if(idle_time >= MAX_IDLE_TIME/SM_ITER_TIME)
                 ShutDown();
             RunEngine(0);
+            gDoorOpenCount = 0; // reset filter when idle
             // if( !digitalRead(PIN_DOOR_CLOSE_BTN)) // both button and IR signals the door is CLOSE -> the Button is valid to use
             //     gBtn_isValid = 1;
         break;
         case 1: // open the door
             RunEngine(1);
             idle_time++;
+
+            // Debounce filter: require 11 consecutive HIGH readings
+            if(digitalRead(PIN_DOOR_CLOSE_BTN))
+                gDoorOpenCount++;
+            else
+                gDoorOpenCount = 0;
+
             if((idle_time >= rotation_timeout/SM_ITER_TIME) ||
-                    (digitalRead(PIN_DOOR_CLOSE_BTN)) )
+                    (gDoorOpenCount >= DOOR_OPEN_THRESHOLD) )
             {
                 RunEngine(0);
+                gDoorOpenCount = 0;
                 gSM_state = 2;
+                delay(1000);
             }
         break;
         case 2:
