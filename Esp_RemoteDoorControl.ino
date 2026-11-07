@@ -6,6 +6,10 @@
 #include <EEPROM.h>
 
 #define BARKER 0x1234
+#define EEPROM_SIZE 16
+#define REVERSE_FLAG_ADDR 12
+#define REVERSE_PENDING 0xA5
+#define REVERSE_COMPLETE 0x00
 
 #define PIN_LATCH_POWER 4   // latch power
 #define PIN_IR_DETECTOR_EN 5
@@ -46,11 +50,13 @@ unsigned int ReverseHoldOff = 2000;
 void RunEngine(int direction);
 void Handle_SM();
 void ShutDown();
+bool SetReversePending(bool pending);
+bool IsReversePending();
 
 void eeprom_handler()
 {
     unsigned int data;
-    EEPROM.begin(12);
+    EEPROM.begin(EEPROM_SIZE);
     EEPROM.get(0, data);
     if ( data != BARKER)
     {
@@ -59,7 +65,9 @@ void eeprom_handler()
         EEPROM.put(0, BARKER);
         EEPROM.put(4, RotationPol);
         EEPROM.put(8, ReverseHoldOff);
+        EEPROM.write(REVERSE_FLAG_ADDR, REVERSE_COMPLETE);
         EEPROM.commit();
+        EEPROM.end();
         return;
     }
     else{
@@ -71,6 +79,25 @@ void eeprom_handler()
         Serial.print(ReverseHoldOff);
     }
     EEPROM.end();
+}
+
+// Store the recovery marker in the same EEPROM emulation area as the configuration.
+// Commit before motor activation; only clear after reverse has stopped.
+bool SetReversePending(bool pending)
+{
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.write(REVERSE_FLAG_ADDR, pending ? REVERSE_PENDING : REVERSE_COMPLETE);
+    bool success = EEPROM.commit();
+    EEPROM.end();
+    return success;
+}
+
+bool IsReversePending()
+{
+    EEPROM.begin(EEPROM_SIZE);
+    bool pending = (EEPROM.read(REVERSE_FLAG_ADDR) == REVERSE_PENDING);
+    EEPROM.end();
+    return pending;
 }
 
 void setup() 
@@ -85,6 +112,15 @@ void setup()
     pinMode(PIN_ENGINE_UP, OUTPUT);
     pinMode(PIN_ENGINE_DOWN, OUTPUT);
     digitalWrite(PIN_IR_DETECTOR_EN, 0);
+
+    // A reset during opening can leave the mechanical latch loaded.
+    // Recover only when a previously committed reverse is pending and
+    // the door-open sensor currently reads HIGH.
+    if (IsReversePending() && digitalRead(PIN_DOOR_CLOSE_BTN)) {
+        Serial.println("Interrupted opening detected: resume at reverse state");
+        gSM_state = 2;
+    }
+
 
     WiFi.mode(WIFI_STA);
     WiFi.setPhyMode(WIFI_PHY_MODE_11G);
@@ -197,7 +233,7 @@ void handleRoot() {                         // When URI / is requested, send a w
   if(digitalRead(PIN_DOOR_CLOSE_BTN)) 
     color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
-  html += "<h1>ESP8266 Web Server ver 10</h1>";
+  html += "<h1>ESP8266 Web Server ver 11</h1>";
   html += "<div style='display: flex; flex-direction: column; align-items: flex-start; padding: 20px;'>";  // Container with flexbox
   html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: "+color+"; margin-bottom: 20px;' onclick='turnOn()'>Open door</button>";
   html += "<button id='RevButton' style='font-size: 50px; padding: 26px; margin-bottom: 20px; background-color: #33fff9' onclick='revTurn()'>Reverse</button>";
@@ -246,6 +282,12 @@ void handleTurnOn() {
     String response = "";
     if(!digitalRead(PIN_DOOR_CLOSE_BTN))    
     {
+        // Persist recovery intent BEFORE energizing the motor.
+        if (!SetReversePending(true)) {
+            Serial.println("ERROR: Failed to save reverse pending flag");
+            server.send(500, "text/plain", "Flash write failed; door not opened");
+            return;
+        }
         response = "Going to open";
         Serial.println("Going to open");
         gSM_state = 1;
@@ -320,16 +362,24 @@ void Handle_SM()
             Serial.println("Starting reverse");
             RunEngine(-1);
             delay(ReverseHoldOff);
+            RunEngine(0); // stop motor BEFORE clearing the recovery marker
             Serial.println("Off engine");
+            if (!SetReversePending(false)) {
+                Serial.println("ERROR: Reverse completed but flag commit failed");
+                // Enter a stopped error state rather than sleeping and
+                // automatically repeating the reverse on the next boot.
+                gSM_state = 3;
+                break;
+            }
             gSM_state = 0;
             ShutDown();
            
         break;
-        case 3:
-            Serial.println("time pass");
+        case 3: // flash error: leave motor off until manually reset
+            RunEngine(0);
             break;
         case 4:
-            EEPROM.begin(12);
+            EEPROM.begin(EEPROM_SIZE);
             EEPROM.put(4, RotationPol);
             EEPROM.put(8, ReverseHoldOff);
             EEPROM.commit();
