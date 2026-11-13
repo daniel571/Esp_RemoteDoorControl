@@ -52,6 +52,7 @@ void Handle_SM();
 void ShutDown();
 bool SetReversePending(bool pending);
 bool IsReversePending();
+bool ReadDoorOpenDebounced(bool &doorIsOpen);
 
 void eeprom_handler()
 {
@@ -100,6 +101,33 @@ bool IsReversePending()
     return pending;
 }
 
+// Returns true only when GPIO13 gives 11 consecutive matching readings.
+// The output is only valid when true is returned.
+bool ReadDoorOpenDebounced(bool &doorIsOpen)
+{
+    const unsigned int requiredSamples = 11;
+    const unsigned int sampleIntervalMs = 10;
+    const unsigned int maxSamples = 50; // 500 ms maximum
+    int previous = -1;
+    unsigned int consecutive = 0;
+
+    for (unsigned int i = 0; i < maxSamples; ++i) {
+        int reading = digitalRead(PIN_DOOR_CLOSE_BTN);
+        if (reading == previous) {
+            ++consecutive;
+        } else {
+            previous = reading;
+            consecutive = 1;
+        }
+        if (consecutive >= requiredSamples) {
+            doorIsOpen = (reading == HIGH);
+            return true;
+        }
+        delay(sampleIntervalMs);
+    }
+    return false;
+}
+
 void setup() 
 {
     Serial.begin(115200);
@@ -113,14 +141,37 @@ void setup()
     pinMode(PIN_ENGINE_DOWN, OUTPUT);
     digitalWrite(PIN_IR_DETECTOR_EN, 0);
 
-    // A reset during opening can leave the mechanical latch loaded.
-    // Recover only when a previously committed reverse is pending and
-    // the door-open sensor currently reads HIGH.
-    if (IsReversePending() && digitalRead(PIN_DOOR_CLOSE_BTN)) {
+    // The door sensor takes precedence over the flash recovery marker.
+    // A CLOSED door means normal startup, even if flash says reverse pending.
+    // Clear that stale marker so a future reset while OPEN cannot trigger
+    // an unrelated reverse operation.
+    // Require 11 consecutive matching samples, spaced 10 ms apart.
+    // Fail safe if the sensor is unstable for 500 ms.
+    bool doorIsOpen = false;
+    const bool sensorStable = ReadDoorOpenDebounced(doorIsOpen);
+    const bool reversePending = IsReversePending();
+
+    if (!sensorStable) {
+        Serial.println("ERROR: Door sensor unstable at boot");
+        // Keep the flash marker unchanged; do not move the motor.
+        gSM_state = 3;
+    } else if (!doorIsOpen) {
+        if (reversePending) {
+            Serial.println("Door closed: clearing stale reverse flag");
+            if (!SetReversePending(false)) {
+                Serial.println("ERROR: Failed to clear stale reverse flag");
+                gSM_state = 3;
+            }
+        }
+    } else if (reversePending) {
         Serial.println("Interrupted opening detected: resume at reverse state");
         gSM_state = 2;
+        Handle_SM();
+//
+//        // Handle_SM() state 2 should call ShutDown().
+//        // Never continue to Wi-Fi initialization.
+        return;
     }
-
 
     WiFi.mode(WIFI_STA);
     WiFi.setPhyMode(WIFI_PHY_MODE_11G);
@@ -233,7 +284,7 @@ void handleRoot() {                         // When URI / is requested, send a w
   if(digitalRead(PIN_DOOR_CLOSE_BTN)) 
     color="#ff0000"; //red
   String html = "<!DOCTYPE html><html><head><title>ESP8266 Web Server</title></head><body>";
-  html += "<h1>ESP8266 Web Server ver 11</h1>";
+  html += "<h1>ESP8266 Web Server ver 12 </h1>";
   html += "<div style='display: flex; flex-direction: column; align-items: flex-start; padding: 20px;'>";  // Container with flexbox
   html += "<button id='turnButton' style='font-size: 100px; padding: 57px; background-color: "+color+"; margin-bottom: 20px;' onclick='turnOn()'>Open door</button>";
   html += "<button id='RevButton' style='font-size: 50px; padding: 26px; margin-bottom: 20px; background-color: #33fff9' onclick='revTurn()'>Reverse</button>";
@@ -422,3 +473,4 @@ void ShutDown()
     delay(100);
     ESP.deepSleep(0); 
 }
+
